@@ -254,7 +254,22 @@ cmd_sync(int nargs, char **args)
 	(void)nargs;
 	(void)args;
 
-	vfs_sync();
+	
+
+	return 0;
+}
+
+/*
+ * Command for enabling DB_THREADS debugging msgs.
+ */
+static
+int
+cmd_dth(int nargs, char **args)
+{
+	(void)nargs;
+	(void)args;
+
+	dbflags = dbflags | DB_THREADS;
 
 	return 0;
 }
@@ -437,6 +452,7 @@ static const char *opsmenu[] = {
 	"[sync]    Sync filesystems          ",
 	"[panic]   Intentional panic         ",
 	"[q]       Quit and shut down        ",
+	"[dth]     Enable DB_THREADS debug msgs",
 	NULL
 };
 
@@ -549,6 +565,7 @@ static struct {
 	{ "q",		cmd_quit },
 	{ "exit",	cmd_quit },
 	{ "halt",	cmd_quit },
+	{ "dth",	cmd_dth },
 
 #if OPT_SYNCHPROBS
 	/* in-kernel synchronization problem(s) */
