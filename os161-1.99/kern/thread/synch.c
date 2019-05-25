@@ -150,6 +150,7 @@ V(struct semaphore *sem)
 struct lock *
 lock_create(const char *name)
 {
+
         struct lock *lock;
 
         lock = kmalloc(sizeof(struct lock));
@@ -164,6 +165,15 @@ lock_create(const char *name)
         }
         
         // add stuff here as needed
+        lock->lock_wchan = wchan_create(lock->lk_name);
+        if (lock->lk_name == NULL) {
+                kfree(lock->lk_name);
+                kfree(lock);
+                return NULL;
+        }
+        spinlock_init(&lock->sl);
+        lock->owner = NULL;
+        lock->held = false;
         
         return lock;
 }
@@ -182,27 +192,49 @@ lock_destroy(struct lock *lock)
 void
 lock_acquire(struct lock *lock)
 {
-        // Write this
+        KASSERT(lock != NULL);
+        KASSERT(lock_do_i_hold(lock) == false);
 
-        (void)lock;  // suppress warning until code gets written
+        spinlock_acquire(&lock->sl);
+            while (lock->held) {
+                wchan_lock(lock->lock_wchan);
+                spinlock_release(&lock->sl);
+                wchan_sleep(lock->lock_wchan);
+
+                spinlock_acquire(&lock->sl);
+            }
+        lock->held = true;
+        lock->owner = curthread;
+        spinlock_release(&lock->sl);
+        //(void)lock;  // suppress warning until code gets written
 }
 
 void
 lock_release(struct lock *lock)
 {
-        // Write this
+        KASSERT(lock != NULL);
+        KASSERT(lock_do_i_hold(lock));
 
-        (void)lock;  // suppress warning until code gets written
+        spinlock_acquire(&lock->sl);
+
+        lock->held = false;
+        lock->owner = NULL;
+        wchan_wakeone(lock->lock_wchan);
+
+        spinlock_release(&lock->sl);
+
+        // (void)lock;  // suppress warning until code gets written
 }
 
 bool
 lock_do_i_hold(struct lock *lock)
 {
-        // Write this
 
-        (void)lock;  // suppress warning until code gets written
+        // (void)lock;  // suppress warning until code gets written
 
-        return true; // dummy until code gets written
+       // return lock->ownder == curthread; // dummy until code gets written
+        return lock->owner == curthread;
+
 }
 
 ////////////////////////////////////////////////////////////
