@@ -22,10 +22,12 @@
  * replace this with declarations of any synchronization and other variables you need here
  */
 static struct lock *intersection;
-static struct cv *northcv, *southcv, *eastcv, *westcv;
+static struct cv *northcv, *southcv, *eastcv, *westcv, *maxcv;
 volatile int intersectionCount;
 volatile int waits[4];
 volatile unsigned int signal;
+volatile int letin;
+volatile int nextdir;
 
 
 /* 
@@ -41,6 +43,8 @@ intersection_sync_init(void)
   /* replace this default implementation with your own implementation */
   intersectionCount = 0;
   signal = 4;
+  nextdir = -1;
+  // letin = 0;
   for (int i = 0; i < 4; i++) {
     waits[i] = 0;
   }
@@ -50,9 +54,9 @@ intersection_sync_init(void)
   southcv = cv_create("southcv");
   westcv = cv_create("westcv");
   northcv = cv_create("northcv");
+  maxcv = cv_create("maxcv");
 
-
-  if (intersection == NULL || eastcv == NULL || westcv == NULL || southcv == NULL || northcv == NULL) {
+  if (intersection == NULL || eastcv == NULL || westcv == NULL || southcv == NULL || northcv == NULL || maxcv == NULL) {
     panic("could not create cv or locks");
   }
   return;
@@ -74,12 +78,14 @@ intersection_sync_cleanup(void)
   KASSERT(westcv != NULL);
   KASSERT(northcv != NULL);
   KASSERT(southcv != NULL);
+  KASSERT(maxcv != NULL);
 
   lock_destroy(intersection);
   cv_destroy(eastcv);
   cv_destroy(westcv);
   cv_destroy(southcv);
   cv_destroy(northcv);
+  cv_destroy(maxcv);
 }
 
 
@@ -101,18 +107,33 @@ intersection_before_entry(Direction origin, Direction destination)
 {
   /* replace this default implementation with your own implementation */
   // (void)origin;  /* avoid compiler complaint about unused parameter */
-  (void)destination;  //avoid compiler complaint about unused parameter 
   // KASSERT(intersectionSem != NULL);
   // P(intersectionSem);
   lock_acquire(intersection);
   if (signal == 4) { //no one is waiting or in the intersection
     intersectionCount++;
     signal = origin;
-  } else if (signal == origin) {
+  }
+  //  else if (letin > 20) {
+  //   letin=0;
+  //   waits[origin]++;
+  //   if (origin == 0) {
+  //     cv_wait(northcv, intersection);
+  //   } else if (origin == 1) {
+  //     cv_wait(eastcv, intersection);
+  //   } else if (origin == 2) {
+  //     cv_wait(southcv, intersection);
+  //   } else if (origin == 3) {
+  //     cv_wait(westcv, intersection);
+  //   }
+  //   waits[origin]--;
+  //   intersectionCount++;
+  // } 
+
+  else if ((signal == origin)|| (origin == (signal+1)%4 && destination == signal)) {
     intersectionCount++;
-  } else if (origin == (signal+1)%4 && destination == signal) {
-    intersectionCount++;
-  } else {
+  } 
+  else {
     waits[origin]++;
     if (origin == 0) {
       cv_wait(northcv, intersection);
@@ -126,6 +147,7 @@ intersection_before_entry(Direction origin, Direction destination)
     waits[origin]--;
     intersectionCount++;
   }
+  // letin++;
   lock_release(intersection);
 }
 
@@ -143,17 +165,18 @@ intersection_before_entry(Direction origin, Direction destination)
 void
 intersection_after_exit(Direction origin, Direction destination) 
 {
-  (void) origin;
-  (void)destination;  //avoid compiler complaint about unused parameter 
-
+  (void)origin;  //avoid compiler complaint about unused parameter 
+  (void)destination;
   lock_acquire(intersection);
   intersectionCount--;
   int currentWait = 0;
   int index = -1; //the index with maximum waits
+  //int secondHighestIndex = -1;
 
   for (int i = 0; i < 4; i++) {
     if (waits[i] > currentWait) {
       currentWait = waits[i];
+      //secondHighestIndex = index;
       index = i;
     }
   }
@@ -162,22 +185,21 @@ intersection_after_exit(Direction origin, Direction destination)
     if (index < 0) { //no one is waiting
       signal = 4;
     } else {
-      int nextdir = (signal+1)%4;
+      nextdir = (signal+1)%4;
       if (waits[nextdir] > 0) {
         signal = nextdir;
       } else {
         signal = index;
       }
-
       if (signal == 0) {
-        cv_broadcast(northcv, intersection);
-      } else if (signal == 1) {
-        cv_broadcast(eastcv, intersection);
-      }  else if (signal == 2) {
-        cv_broadcast(southcv, intersection);
-      }  else if (signal == 3) {
-        cv_broadcast(westcv, intersection);
-      }
+          cv_broadcast(northcv, intersection);
+        } else if (signal == 1) {
+          cv_broadcast(eastcv, intersection);
+        }  else if (signal == 2) {
+          cv_broadcast(southcv, intersection);
+        }  else if (signal == 3) {
+          cv_broadcast(westcv, intersection);
+        }
     }
   }
   lock_release(intersection);
