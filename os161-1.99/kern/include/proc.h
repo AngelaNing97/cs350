@@ -38,6 +38,8 @@
 
 #include <spinlock.h>
 #include <thread.h> /* required for struct threadarray */
+#include <array.h>
+#include "opt-A2.h"
 
 struct addrspace;
 struct vnode;
@@ -58,6 +60,8 @@ struct proc {
 
 	/* VFS */
 	struct vnode *p_cwd;		/* current working directory */
+	
+	
 
 #ifdef UW
   /* a vnode to refer to the console device */
@@ -69,10 +73,30 @@ struct proc {
 #endif
 
 	/* add more material here as needed */
+	#if OPT_A2 
+	pid_t pid;
+	pid_t ppid;
+	struct array *childrenProcsIds;
+	#endif /* OPT_A2 */
 };
 
 /* This is the process structure for the kernel and for kernel-only threads. */
 extern struct proc *kproc;
+
+#if OPT_A2 
+volatile int counter;
+struct lock *procLock;
+
+struct procTableEntry {
+	pid_t pid;
+	// pid_t ppid;
+	int exit_code;
+};
+struct array *procTable;
+int addToProcTable(pid_t pid);
+// int setProcPPid(pid_t ppid);
+#endif /* OPT_A2 */
+
 
 /* Semaphore used to signal when there are no more processes */
 #ifdef UW

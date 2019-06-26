@@ -50,11 +50,19 @@
 #include <vfs.h>
 #include <synch.h>
 #include <kern/fcntl.h>  
+#include "opt-A2.h"
+#include <array.h>
 
 /*
  * The process for the kernel; this holds all the kernel-only threads.
  */
 struct proc *kproc;
+
+// #if OPT_A2 
+// 	struct lock *procLock;
+// 	volatile int counter;
+// #endif /* OPT_A2 */
+
 
 /*
  * Mechanism for making the kernel menu thread sleep while processes are running
@@ -102,6 +110,32 @@ proc_create(const char *name)
 #ifdef UW
 	proc->console = NULL;
 #endif // UW
+
+// #if OPT_A2 
+// 	proc->parent = NULL;
+// 	proc->childrenProcs = array_create();
+// 	if (proc->childrenProcs == NULL) {
+// 		panic("fail to create childrenProcs array\n");
+// 	}
+// 	array_init(childrenProcs);
+// #endif /* OPT_A2 */
+	#if OPT_A2 
+	if (counter == 7) { // this is kernel proc
+		proc->pid = 6;
+		// proc->ppid = 5;
+	} else {
+		lock_acquire(procLock);
+		proc->pid = counter;
+	  counter++;
+	  proc->childrenProcsIds = array_create();
+		addToProcTable(proc->pid);
+		if (proc->childrenProcsIds == NULL) {
+			panic("fail to create childrenProcsIds array\n");
+		}
+		array_init(proc->childrenProcsIds);
+	  lock_release(procLock);
+	}
+  #endif /* OPT_A2 */
 
 	return proc;
 }
@@ -193,6 +227,10 @@ proc_destroy(struct proc *proc)
 void
 proc_bootstrap(void)
 {
+	#if OPT_A2 
+	counter = 7;
+	#endif /* OPT_A2 */
+	
   kproc = proc_create("[kernel]");
   if (kproc == NULL) {
     panic("proc_create for kproc failed\n");
@@ -207,6 +245,20 @@ proc_bootstrap(void)
   if (no_proc_sem == NULL) {
     panic("could not create no_proc_sem semaphore\n");
   }
+
+  #if OPT_A2 
+  	procLock = lock_create("proc_lock");
+  	if (procLock == NULL) {
+    panic("could not create procLock\n");
+
+    procTable = array_create();
+    if (procTable == NULL) {
+    	panic("cannot create procTable array\n");
+    }
+    array_init(procTable);
+  }
+  #endif /* OPT_A2 */
+
 #endif // UW 
 }
 
@@ -364,3 +416,13 @@ curproc_setas(struct addrspace *newas)
 	spinlock_release(&proc->p_lock);
 	return oldas;
 }
+
+#if OPT_A2 
+int
+addToProcTable(pid_t pid) {
+	struct procTableEntry *pte = kmalloc(sizeof(struct procTableEntry));
+	pte->exit_code = -1; //for now
+	pte->pid = pid;
+	return array_add(procTable, pte, NULL);
+}
+#endif /* OPT_A2 */
