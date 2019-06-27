@@ -86,6 +86,7 @@ extern struct proc *kproc;
 #if OPT_A2 
 volatile int counter;
 struct lock *procLock;
+struct cv *procExitCV;
 
 struct procTableEntry {
 	pid_t pid;
@@ -94,6 +95,10 @@ struct procTableEntry {
 };
 struct array *procTable;
 int addToProcTable(pid_t pid);
+struct procTableEntry *getProcTableEntry(pid_t pid);
+int setProcExitCode(pid_t pid, int exit_code);
+void removeProcFromTable(pid_t pid);
+void removeProcFromParent(pid_t pid);
 // int setProcPPid(pid_t ppid);
 #endif /* OPT_A2 */
 
