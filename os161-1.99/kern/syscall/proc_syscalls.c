@@ -33,6 +33,17 @@ void sys__exit(int exitcode) {
         panic("process does not exist in proc table\n");
       }
       cv_broadcast(procExitCV, procLock);
+      
+      for (unsigned int i = 0; i < array_num(procTable); i++) { //change all child process's ppid to -1
+        struct procTableEntry *pte = array_get(procTable, i);
+        if (pte->ppid == pte->pid) {
+          pte->ppid = -1;
+        }
+        if (pte->ppid == -1 && pte->exit_code != -6) { //proc has no living parent and has finished
+          removeProcFromTable(pte->pid);
+        }
+      }
+
     }
     lock_release(procLock);
   #else
@@ -112,10 +123,9 @@ sys_waitpid(pid_t pid,
   // check if curproc is parent of this pid
   if ((int)curproc->pid != 6) { //not kernel proc
     bool isChild = false;
-    struct array *childrenProcs = curproc->childrenProcsIds;
-    for (unsigned int i = 0; i < array_num(childrenProcs); i++) {
-      pid_t child_pid = * (pid_t *)array_get(childrenProcs, i);
-      if (child_pid == pid) {
+    for (unsigned int i = 0; i < array_num(procTable); i++) {
+      struct procTableEntry *pte = array_get(procTable, i);
+      if (pte->pid == pid && pte->ppid == curproc->pid) {
         isChild = true;
         break;
       }
@@ -132,21 +142,17 @@ sys_waitpid(pid_t pid,
     return ESRCH;
   }
 
-  // if (pte->exit_code != -6) { // if waitpid is called after the child process has exited
-  //   exitstatus = pte->exit_code;
-  // } else { // if waitpid is called before the child exits
-  // }
   while(pte->exit_code == -6) {
     cv_wait(procExitCV, procLock);
   }
   exitstatus = pte->exit_code;
   removeProcFromTable(pid);
-  // removeProcFromParent(pid); //dont REALLY need to remove the proc from parent
   lock_release(procLock);
 
   #else
   exitstatus = 0;
   #endif /* OPT_A2 */
+
   result = copyout((void *)&exitstatus,status,sizeof(int));
   if (result) {
     return(result);
@@ -183,19 +189,11 @@ sys_fork(struct trapframe *tf, pid_t *retval)
   spinlock_release(&child_proc->p_lock);
 
   // 4. assign pid to child process and create the child/parent relationship
-
   lock_acquire(procLock);
   child_proc->ppid = curproc->pid;
   if (curproc->pid >= 7) {
-    pid_t *pidp = kmalloc(sizeof(pid_t));
-    *pidp = child_proc->pid;
-    array_add(curproc->childrenProcsIds, pidp, NULL);
+    setProcPPid(child_proc->pid, curproc->pid);
   }
-  // counter++;
-  // child_proc->pid = (pid_t) counter;
-  // // child_proc->parent = curproc;
-  // // array_add(curproc->childrenProcs, child_proc);
-  // addToProcTable(child_proc->pid, curproc->pid);
   lock_release(procLock);
 
   // 5. create thread for child process, need a safe way to pass the trapframe to the child thread

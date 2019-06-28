@@ -76,7 +76,6 @@ struct proc {
 	#if OPT_A2 
 	pid_t pid;
 	pid_t ppid;
-	struct array *childrenProcsIds;
 	#endif /* OPT_A2 */
 };
 
@@ -90,16 +89,15 @@ struct cv *procExitCV;
 
 struct procTableEntry {
 	pid_t pid;
-	// pid_t ppid;
+	pid_t ppid;
 	int exit_code;
 };
 struct array *procTable;
 int addToProcTable(pid_t pid);
 struct procTableEntry *getProcTableEntry(pid_t pid);
 int setProcExitCode(pid_t pid, int exit_code);
+int setProcPPid(pid_t pid, pid_t ppid);
 void removeProcFromTable(pid_t pid);
-void removeProcFromParent(pid_t pid);
-// int setProcPPid(pid_t ppid);
 #endif /* OPT_A2 */
 
 
