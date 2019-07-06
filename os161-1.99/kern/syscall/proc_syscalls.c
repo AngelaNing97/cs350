@@ -12,6 +12,8 @@
 #include <synch.h>
 #include <machine/trapframe.h>
 #include "opt-A2.h"
+#include <vfs.h>
+#include <kern/fcntl.h>
 
 // hold the handlers for process-related system calls
 // TODO: add handlers for the 4 ops
@@ -189,6 +191,7 @@ sys_fork(struct trapframe *tf, pid_t *retval)
   spinlock_release(&child_proc->p_lock);
 
   // 4. assign pid to child process and create the child/parent relationship
+
   lock_acquire(procLock);
   child_proc->ppid = curproc->pid;
   if (curproc->pid >= 7) {
@@ -215,6 +218,81 @@ sys_fork(struct trapframe *tf, pid_t *retval)
 
   *retval = child_proc->pid;
   return 0;
+}
+
+int sys_execv(char *program, char **args) {
+  (void) args; //for now, no args passing
+
+  //credit: copied from runprogram
+  struct addrspace *as;
+  struct vnode *v;
+  vaddr_t entrypoint, stackptr;
+  int result;
+
+  /* get the program path */
+  if (program == NULL) {
+    return EFAULT;
+  }
+  size_t progname_size = strlen(program)+1;
+  char *progname = kmalloc(progname_size * sizeof(char));
+  if (progname == NULL) {
+    return ENOMEM;
+  }
+  int copyname_res = copyinstr((const_userptr_t) program, progname, progname_size, NULL);
+  if (copyname_res) {
+    kfree(progname);
+    return copyname_res;
+  }
+
+  /* Open the file. */
+  result = vfs_open(progname, O_RDONLY, 0, &v);
+  if (result) {
+    return result;
+  }
+
+  KASSERT(curproc_getas() != NULL);
+  struct addrspace *oldas = curproc_getas();
+
+  /* Create a new address space. */
+  as = as_create();
+  if (as ==NULL) {
+    vfs_close(v);
+    return ENOMEM;
+  }
+
+  /* Switch to it and activate it. */
+  curproc_setas(as);
+  as_activate();
+
+  /* Load the executable. */
+  result = load_elf(v, &entrypoint);
+  if (result) {
+    /* p_addrspace will go away when curproc is destroyed */
+    vfs_close(v);
+    return result;
+  }
+
+  /* Done with the file now. */
+  vfs_close(v);
+
+  /* Define the user stack in the address space */
+  result = as_define_stack(as, &stackptr);
+  if (result) {
+    /* p_addrspace will go away when curproc is destroyed */
+    return result;
+  }
+
+  //delete old address space
+  as_destroy(oldas);
+
+  /* Warp to user mode. */
+  enter_new_process(0 /*argc*/, NULL /*userspace addr of argv*/,
+        stackptr, entrypoint);
+  
+  /* enter_new_process does not return. */
+  panic("enter_new_process returned\n");
+  return EINVAL;
+
 }
 #endif /* OPT_A2 */
 
