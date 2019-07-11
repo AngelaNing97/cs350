@@ -353,25 +353,28 @@ as_define_stack(struct addrspace *as, vaddr_t *stackptr, char **args, int argsCo
 
 	*stackptr = USERSTACK;
 
-	int result = 0;
+	int result;
 	vaddr_t argStackAddr[argsCount+1];
 
   for (int i = argsCount-1; i >= 0; i--) { // put the strings onto the stack
     size_t decrement = strlen(args[i]) + 1;
+    decrement = ROUNDUP(decrement, 8);
     *stackptr -= decrement;
     argStackAddr[i] = *stackptr;
     result = copyoutstr(args[i], (userptr_t)*stackptr, decrement, NULL);
+    if (result) {
+    	return result;
+    }
   }
   argStackAddr[argsCount] = 0;
 
-  // align the stack ptr to be 4 byte aligned
-  while (*stackptr % 4 != 0) {
-    *stackptr -= 1;
-  }
-
   for (int i = argsCount; i >=0; i--) { // put the ptr onto the stack
-    *stackptr -= ROUNDUP(sizeof(vaddr_t), 4);
-    result = copyout(&argStackAddr[i], (userptr_t)*stackptr, 4);
+  	size_t decrement = ROUNDUP(sizeof(vaddr_t), 4);
+    *stackptr -= decrement;
+    result = copyout(&argStackAddr[i], (userptr_t)*stackptr, decrement);
+    if (result) {
+    	return result;
+    }
   }
 	return 0;
 }

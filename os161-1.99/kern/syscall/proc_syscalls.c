@@ -246,30 +246,29 @@ int sys_execv(char *program, char **args) {
   }
 
   //TODO: count the number of arguments and copy them into the kernel
-  while (args[ac] != NULL) {
-    ac++;
+  if (args != NULL) {
+    while (args[ac] != NULL) {
+      ac++;
+    }
   }
   char **programArgs = kmalloc((ac+1) * sizeof(char *));
   if (programArgs == NULL) {
     kfree(progname);
     return ENOMEM;
   }
-  programArgs[ac] = NULL; //null-terminated
 
   for(int i = 0; i < ac; i++) {
     size_t length = strlen(args[i]) + 1;
     programArgs[i] = kmalloc(sizeof(char) * length);
+    if (programArgs[i] == NULL) {
+      return ENOMEM;
+    }
     result = copyinstr((userptr_t)args[i], programArgs[i], length, NULL);
+    if (result) {
+      return result;
+    }
   }
-
-  // kprintf("number of args: %d \n", ac);
-  // for(int i = 0; i < ac; i++) {
-  //   kprintf(programArgs[i]);
-  //   kprintf("\n");
-  // }
-  // if (programArgs[ac]!=NULL) {
-  //   panic("argument array not null-terminated\n");
-  // }
+  programArgs[ac] = NULL; //null-terminated
 
   /* Open the file. */
   result = vfs_open(progname, O_RDONLY, 0, &v);
@@ -303,47 +302,18 @@ int sys_execv(char *program, char **args) {
   vfs_close(v);
 
   /* Define the user stack in the address space */
-  #if OPT_A2 
   result = as_define_stack(as, &stackptr, programArgs, ac);
-  #else
-  result = as_define_stack(as, &stackptr);
-  #endif /* OPT_A2 */
-  
+
   if (result) {
     /* p_addrspace will go away when curproc is destroyed */
     return result;
   }
 
-//TODO: copy the arguments, both the array and the strings, onto the user stack
-  //1. copy the strings onto user stack
-  // vaddr_t currStack = USERSTACK;
-  // vaddr_t argStackAddr[ac+1];
-  // argStackAddr[ac] = 0;
-
-  // for (int i = ac-1; i >= 0; i--) { // put the strings onto the stack
-  //   size_t decrement = strlen(programArgs[i]) + 1;
-  //   stackptr -= decrement;
-  //   argStackAddr[i] = stackptr;
-  //   result = copyoutstr(programArgs[i], (userptr_t)stackptr, decrement, NULL);
-  // }
-
-  // // align the stack ptr to be 4 byte aligned
-  // while (stackptr % 4 != 0) {
-  //   stackptr -= 1;
-  // }
-
-  // for (int i = ac; i >=0; i--) { // put the ptr onto the stack
-  //   stackptr -= ROUNDUP(sizeof(vaddr_t), 4);
-  //   result = copyout(&argStackAddr[i], (userptr_t)stackptr, 4);
-  // }
-
   //delete old address space
   as_destroy(oldas);
 
-//TODO: call enter_new_process with address to the arguments on the stack, the stack ptr, and the program entry point
+  //call enter_new_process with address to the arguments on the stack, the stack ptr, and the program entry point
   /* Warp to user mode. */
-  // enter_new_process(0 /*argc*/, NULL /*userspace addr of argv*/,
-  //       stackptr, entrypoint);
   enter_new_process(ac /*argc*/, (userptr_t)stackptr /*userspace addr of argv*/,
         stackptr, entrypoint);
   
