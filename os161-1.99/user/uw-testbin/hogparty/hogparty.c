@@ -10,7 +10,7 @@
 #include <unistd.h>
 #include <err.h>
 
-static char *xhargv[2] = { (char *)"xhog", NULL };
+static char *xhargv[4] = { (char *)"xhog", (char *)"test", (char *)"ing", NULL };
 static char *yhargv[2] = { (char *)"yhog", NULL };
 static char *zhargv[2] = { (char *)"zhog", NULL };
 
