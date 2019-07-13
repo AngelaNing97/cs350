@@ -60,11 +60,6 @@
  */
 struct proc *kproc;
 
-// #if OPT_A2 
-// 	struct lock *procLock;
-// 	volatile int counter;
-// #endif /* OPT_A2 */
-
 
 /*
  * Mechanism for making the kernel menu thread sleep while processes are running
@@ -113,32 +108,18 @@ proc_create(const char *name)
 	proc->console = NULL;
 #endif // UW
 
-// #if OPT_A2 
-// 	proc->parent = NULL;
-// 	proc->childrenProcs = array_create();
-// 	if (proc->childrenProcs == NULL) {
-// 		panic("fail to create childrenProcs array\n");
-// 	}
-// 	array_init(childrenProcs);
-// #endif /* OPT_A2 */
-	#if OPT_A2 
+#if OPT_A2 
 	if (counter == 6) { // this is kernel proc
 		proc->pid = 6;
 		counter++;
-		// proc->ppid = 5;
 	} else {
 		lock_acquire(procLock);
 		proc->pid = counter;
 	  counter++;
-	  proc->childrenProcsIds = array_create();
 		addToProcTable(proc->pid);
-		if (proc->childrenProcsIds == NULL) {
-			panic("fail to create childrenProcsIds array\n");
-		}
-		array_init(proc->childrenProcsIds);
 	  lock_release(procLock);
 	}
-  #endif /* OPT_A2 */
+#endif /* OPT_A2 */
 
 	return proc;
 }
@@ -220,7 +201,6 @@ proc_destroy(struct proc *proc)
 	}
 	V(proc_count_mutex);
 #endif // UW
-	
 
 }
 
@@ -450,20 +430,21 @@ getProcTableEntry(pid_t pid) {
 
 int 
 setProcExitCode(pid_t pid, int exit_code) {
-	// struct procTableEntry *pte = NULL;
-	// for (unsigned int i = 0; i < procTable->num; i++) {
-	// 	pte = array_get(procTable, i);
-	// 	if (pte->pid == pid) {
-	// 		pte->exit_code = exit_code;
-	// 		return 0;
-	// 	}
-	// }
-	// return ESRCH;
 	struct procTableEntry *pte = getProcTableEntry(pid);
 	if (pte == NULL) {
 		return ESRCH;
 	}
 	pte->exit_code = _MKWAIT_EXIT(exit_code);
+	return 0;
+}
+
+int
+setProcPPid(pid_t pid, pid_t ppid) {
+	struct procTableEntry *pte = getProcTableEntry(pid);
+	if (pte == NULL) {
+		return ESRCH;
+	}
+	pte->ppid = ppid;;
 	return 0;
 }
 
@@ -479,14 +460,4 @@ removeProcFromTable(pid_t pid) {
 	panic("pid not found for remove proc from proc table");
 }
 
-void removeProcFromParent(pid_t pid) {
-	for (unsigned int i = 0; i < array_num(curproc->childrenProcsIds); i++) {
-		pid_t *cid = array_get(curproc->childrenProcsIds, i);
-		if (*cid == pid) {
-			array_remove(curproc->childrenProcsIds, i);
-			return;
-		}
-	}
-	panic("pid not found for remove proc from parent");
-}
 #endif /* OPT_A2 */

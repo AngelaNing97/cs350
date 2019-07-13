@@ -45,6 +45,7 @@
 extern void asm_usermode(struct trapframe *tf);
 
 /* called only from assembler, so not declared in a header */
+//mips trap() gets called by the assembly language exception handler
 void mips_trap(struct trapframe *tf);
 
 

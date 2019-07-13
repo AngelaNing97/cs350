@@ -12,6 +12,8 @@
 #include <synch.h>
 #include <machine/trapframe.h>
 #include "opt-A2.h"
+#include <vfs.h>
+#include <kern/fcntl.h>
 
 // hold the handlers for process-related system calls
 // TODO: add handlers for the 4 ops
@@ -33,6 +35,17 @@ void sys__exit(int exitcode) {
         panic("process does not exist in proc table\n");
       }
       cv_broadcast(procExitCV, procLock);
+      
+      for (unsigned int i = 0; i < array_num(procTable); i++) { //change all child process's ppid to -1
+        struct procTableEntry *pte = array_get(procTable, i);
+        if (pte->ppid == pte->pid) {
+          pte->ppid = -1;
+        }
+        if (pte->ppid == -1 && pte->exit_code != -6) { //proc has no living parent and has finished
+          removeProcFromTable(pte->pid);
+        }
+      }
+
     }
     lock_release(procLock);
   #else
@@ -112,10 +125,9 @@ sys_waitpid(pid_t pid,
   // check if curproc is parent of this pid
   if ((int)curproc->pid != 6) { //not kernel proc
     bool isChild = false;
-    struct array *childrenProcs = curproc->childrenProcsIds;
-    for (unsigned int i = 0; i < array_num(childrenProcs); i++) {
-      pid_t child_pid = * (pid_t *)array_get(childrenProcs, i);
-      if (child_pid == pid) {
+    for (unsigned int i = 0; i < array_num(procTable); i++) {
+      struct procTableEntry *pte = array_get(procTable, i);
+      if (pte->pid == pid && pte->ppid == curproc->pid) {
         isChild = true;
         break;
       }
@@ -132,21 +144,17 @@ sys_waitpid(pid_t pid,
     return ESRCH;
   }
 
-  // if (pte->exit_code != -6) { // if waitpid is called after the child process has exited
-  //   exitstatus = pte->exit_code;
-  // } else { // if waitpid is called before the child exits
-  // }
   while(pte->exit_code == -6) {
     cv_wait(procExitCV, procLock);
   }
   exitstatus = pte->exit_code;
   removeProcFromTable(pid);
-  // removeProcFromParent(pid); //dont REALLY need to remove the proc from parent
   lock_release(procLock);
 
   #else
   exitstatus = 0;
   #endif /* OPT_A2 */
+
   result = copyout((void *)&exitstatus,status,sizeof(int));
   if (result) {
     return(result);
@@ -187,15 +195,8 @@ sys_fork(struct trapframe *tf, pid_t *retval)
   lock_acquire(procLock);
   child_proc->ppid = curproc->pid;
   if (curproc->pid >= 7) {
-    pid_t *pidp = kmalloc(sizeof(pid_t));
-    *pidp = child_proc->pid;
-    array_add(curproc->childrenProcsIds, pidp, NULL);
+    setProcPPid(child_proc->pid, curproc->pid);
   }
-  // counter++;
-  // child_proc->pid = (pid_t) counter;
-  // // child_proc->parent = curproc;
-  // // array_add(curproc->childrenProcs, child_proc);
-  // addToProcTable(child_proc->pid, curproc->pid);
   lock_release(procLock);
 
   // 5. create thread for child process, need a safe way to pass the trapframe to the child thread
@@ -217,6 +218,109 @@ sys_fork(struct trapframe *tf, pid_t *retval)
 
   *retval = child_proc->pid;
   return 0;
+}
+
+int sys_execv(char *program, char **args) {
+  // (void) args; //for now, no args passing
+
+  //credit: copied from runprogram
+  struct addrspace *as;
+  struct vnode *v;
+  vaddr_t entrypoint, stackptr;
+  int result;
+  int ac = 0;
+
+  /* get the program path */
+  if (program == NULL) {
+    return EFAULT;
+  }
+  size_t progname_size = strlen(program)+1;
+  char *progname = kmalloc(progname_size * sizeof(char));
+  if (progname == NULL) {
+    return ENOMEM;
+  }
+  int copyname_res = copyinstr((const_userptr_t) program, progname, progname_size, NULL);
+  if (copyname_res) {
+    kfree(progname);
+    return copyname_res;
+  }
+
+  //TODO: count the number of arguments and copy them into the kernel
+  if (args != NULL) {
+    while (args[ac] != NULL) {
+      ac++;
+    }
+  }
+  char **programArgs = kmalloc((ac+1) * sizeof(char *));
+  if (programArgs == NULL) {
+    kfree(progname);
+    return ENOMEM;
+  }
+
+  for(int i = 0; i < ac; i++) {
+    size_t length = strlen(args[i]) + 1;
+    programArgs[i] = kmalloc(sizeof(char) * length);
+    if (programArgs[i] == NULL) {
+      return ENOMEM;
+    }
+    result = copyinstr((userptr_t)args[i], programArgs[i], length, NULL);
+    if (result) {
+      return result;
+    }
+  }
+  programArgs[ac] = NULL; //null-terminated
+
+  /* Open the file. */
+  result = vfs_open(progname, O_RDONLY, 0, &v);
+  if (result) {
+    return result;
+  }
+
+  KASSERT(curproc_getas() != NULL);
+  struct addrspace *oldas = curproc_getas();
+
+  /* Create a new address space. */
+  as = as_create();
+  if (as ==NULL) {
+    vfs_close(v);
+    return ENOMEM;
+  }
+
+  /* Switch to it and activate it. */
+  curproc_setas(as);
+  as_activate();
+
+  /* Load the executable. */
+  result = load_elf(v, &entrypoint);
+  if (result) {
+    /* p_addrspace will go away when curproc is destroyed */
+    vfs_close(v);
+    return result;
+  }
+
+  /* Done with the file now. */
+  vfs_close(v);
+
+  /* Define the user stack in the address space */
+  result = as_define_stack(as, &stackptr, programArgs, ac);
+
+  if (result) {
+    /* p_addrspace will go away when curproc is destroyed */
+    return result;
+  }
+
+  //delete old address space
+  as_destroy(oldas);
+
+  //call enter_new_process with address to the arguments on the stack, the stack ptr, and the program entry point
+  /* Warp to user mode. */
+  enter_new_process(ac /*argc*/, (userptr_t)stackptr /*userspace addr of argv*/,
+        stackptr, entrypoint);
+  
+  /* enter_new_process does not return. */
+  panic("enter_new_process returned\n");
+  return EINVAL;
+
 }
 #endif /* OPT_A2 */
 

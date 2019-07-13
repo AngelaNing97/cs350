@@ -37,6 +37,8 @@
 #include <mips/tlb.h>
 #include <addrspace.h>
 #include <vm.h>
+#include "opt-A2.h"
+#include <copyinout.h>
 
 /*
  * Dumb MIPS-only "VM system" that is intended to only be just barely
@@ -342,6 +344,42 @@ as_complete_load(struct addrspace *as)
 	return 0;
 }
 
+
+#if OPT_A2 
+int
+as_define_stack(struct addrspace *as, vaddr_t *stackptr, char **args, int argsCount)
+{
+	KASSERT(as->as_stackpbase != 0);
+
+	*stackptr = USERSTACK;
+
+	int result;
+	vaddr_t argStackAddr[argsCount+1];
+
+  for (int i = argsCount-1; i >= 0; i--) { // put the strings onto the stack
+    size_t decrement = strlen(args[i]) + 1;
+    decrement = ROUNDUP(decrement, 8);
+    *stackptr -= decrement;
+    argStackAddr[i] = *stackptr;
+    result = copyoutstr(args[i], (userptr_t)*stackptr, decrement, NULL);
+    if (result) {
+    	return result;
+    }
+  }
+  argStackAddr[argsCount] = 0;
+
+  for (int i = argsCount; i >=0; i--) { // put the ptr onto the stack
+  	size_t decrement = ROUNDUP(sizeof(vaddr_t), 4);
+    *stackptr -= decrement;
+    result = copyout(&argStackAddr[i], (userptr_t)*stackptr, decrement);
+    if (result) {
+    	return result;
+    }
+  }
+	return 0;
+}
+
+#else
 int
 as_define_stack(struct addrspace *as, vaddr_t *stackptr)
 {
@@ -350,6 +388,7 @@ as_define_stack(struct addrspace *as, vaddr_t *stackptr)
 	*stackptr = USERSTACK;
 	return 0;
 }
+#endif /* OPT_A2 */
 
 int
 as_copy(struct addrspace *old, struct addrspace **ret)

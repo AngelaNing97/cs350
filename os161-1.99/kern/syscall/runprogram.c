@@ -44,6 +44,7 @@
 #include <vfs.h>
 #include <syscall.h>
 #include <test.h>
+#include "opt-A2.h"
 
 /*
  * Load program "progname" and start running it in usermode.
@@ -51,8 +52,13 @@
  *
  * Calls vfs_open on progname and thus may destroy it.
  */
+#if OPT_A2 
+int
+runprogram(char *progname, char** args, int nargs)
+#else
 int
 runprogram(char *progname)
+#endif /* OPT_A2 */
 {
 	struct addrspace *as;
 	struct vnode *v;
@@ -91,15 +97,25 @@ runprogram(char *progname)
 	vfs_close(v);
 
 	/* Define the user stack in the address space */
+	#if OPT_A2 
+	result = as_define_stack(as, &stackptr, args, nargs);
+	#else
 	result = as_define_stack(as, &stackptr);
+	#endif /* OPT_A2 */
 	if (result) {
 		/* p_addrspace will go away when curproc is destroyed */
 		return result;
 	}
 
 	/* Warp to user mode. */
+#if OPT_A2 
+	enter_new_process(nargs /*argc*/, (userptr_t)stackptr /*userspace addr of argv*/,
+			  stackptr, entrypoint);
+#else
 	enter_new_process(0 /*argc*/, NULL /*userspace addr of argv*/,
 			  stackptr, entrypoint);
+#endif /* OPT_A2 */
+	
 	
 	/* enter_new_process does not return. */
 	panic("enter_new_process returned\n");
