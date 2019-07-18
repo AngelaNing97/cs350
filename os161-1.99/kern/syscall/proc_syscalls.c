@@ -308,13 +308,17 @@ int sys_execv(char *program, char **args) {
     /* p_addrspace will go away when curproc is destroyed */
     return result;
   }
+  vaddr_t argvaddr = stackptr;
+  while (stackptr % 8 != 0) {
+    stackptr -= 1;
+  }
 
   //delete old address space
   as_destroy(oldas);
 
   //call enter_new_process with address to the arguments on the stack, the stack ptr, and the program entry point
   /* Warp to user mode. */
-  enter_new_process(ac /*argc*/, (userptr_t)stackptr /*userspace addr of argv*/,
+  enter_new_process(ac /*argc*/, (userptr_t)argvaddr/*userspace addr of argv*/,
         stackptr, entrypoint);
   
   /* enter_new_process does not return. */

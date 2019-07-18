@@ -38,6 +38,7 @@
 #include <addrspace.h>
 #include <vm.h>
 #include "opt-A2.h"
+#include "opt-A3.h"
 #include <copyinout.h>
 
 /*
@@ -202,9 +203,15 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 		return 0;
 	}
 
+#if OPT_A3
+	tlb_random(faultaddress, paddr);
+	splx(spl);
+		return 0;
+#else
 	kprintf("dumbvm: Ran out of TLB entries - cannot handle page fault\n");
 	splx(spl);
 	return EFAULT;
+#endif /* OPT_A3 */
 }
 
 struct addrspace *
@@ -352,18 +359,16 @@ as_define_stack(struct addrspace *as, vaddr_t *stackptr, char **args, int argsCo
 	KASSERT(as->as_stackpbase != 0);
 
 	*stackptr = USERSTACK;
-
-	int result;
 	vaddr_t argStackAddr[argsCount+1];
 
   for (int i = argsCount-1; i >= 0; i--) { // put the strings onto the stack
     size_t decrement = strlen(args[i]) + 1;
-    decrement = ROUNDUP(decrement, 8);
+    decrement = ROUNDUP(decrement, 4);
     *stackptr -= decrement;
     argStackAddr[i] = *stackptr;
-    result = copyoutstr(args[i], (userptr_t)*stackptr, decrement, NULL);
-    if (result) {
-    	return result;
+    int res = copyoutstr(args[i], (userptr_t)*stackptr, decrement, NULL);
+    if (res) {
+    	return res;
     }
   }
   argStackAddr[argsCount] = 0;
@@ -371,9 +376,9 @@ as_define_stack(struct addrspace *as, vaddr_t *stackptr, char **args, int argsCo
   for (int i = argsCount; i >=0; i--) { // put the ptr onto the stack
   	size_t decrement = ROUNDUP(sizeof(vaddr_t), 4);
     *stackptr -= decrement;
-    result = copyout(&argStackAddr[i], (userptr_t)*stackptr, decrement);
-    if (result) {
-    	return result;
+    int res = copyout(&argStackAddr[i], (userptr_t)*stackptr, decrement);
+    if (res) {
+    	return res;
     }
   }
 	return 0;
