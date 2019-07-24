@@ -14,6 +14,7 @@
 #include "opt-A2.h"
 #include <vfs.h>
 #include <kern/fcntl.h>
+#include "opt-A3.h"
 
 // hold the handlers for process-related system calls
 // TODO: add handlers for the 4 ops
@@ -245,31 +246,6 @@ int sys_execv(char *program, char **args) {
     return copyname_res;
   }
 
-  //TODO: count the number of arguments and copy them into the kernel
-  if (args != NULL) {
-    while (args[ac] != NULL) {
-      ac++;
-    }
-  }
-  char **programArgs = kmalloc((ac+1) * sizeof(char *));
-  if (programArgs == NULL) {
-    kfree(progname);
-    return ENOMEM;
-  }
-
-  for(int i = 0; i < ac; i++) {
-    size_t length = strlen(args[i]) + 1;
-    programArgs[i] = kmalloc(sizeof(char) * length);
-    if (programArgs[i] == NULL) {
-      return ENOMEM;
-    }
-    result = copyinstr((userptr_t)args[i], programArgs[i], length, NULL);
-    if (result) {
-      return result;
-    }
-  }
-  programArgs[ac] = NULL; //null-terminated
-
   /* Open the file. */
   result = vfs_open(progname, O_RDONLY, 0, &v);
   if (result) {
@@ -300,6 +276,31 @@ int sys_execv(char *program, char **args) {
 
   /* Done with the file now. */
   vfs_close(v);
+
+  //TODO: count the number of arguments and copy them into the kernel
+  if (args != NULL) {
+    while (args[ac] != NULL) {
+      ac++;
+    }
+  }
+  char **programArgs = kmalloc((ac+1) * sizeof(char *));
+  if (programArgs == NULL) {
+    kfree(progname);
+    return ENOMEM;
+  }
+
+  for(int i = 0; i < ac; i++) {
+    size_t length = strlen(args[i]) + 1;
+    programArgs[i] = kmalloc(sizeof(char) * length);
+    if (programArgs[i] == NULL) {
+      return ENOMEM;
+    }
+    result = copyinstr((userptr_t)args[i], programArgs[i], length, NULL);
+    if (result) {
+      return result;
+    }
+  }
+  programArgs[ac] = NULL; //null-terminated
 
   /* Define the user stack in the address space */
   result = as_define_stack(as, &stackptr, programArgs, ac);

@@ -39,6 +39,9 @@
 #include <vm.h>
 #include <mainbus.h>
 #include <syscall.h>
+#include "opt-A3.h"
+#include <kern/wait.h>
+#include <kern/errno.h>
 
 
 /* in exception.S */
@@ -87,6 +90,11 @@ kill_curthread(vaddr_t epc, unsigned code, vaddr_t vaddr)
 		sig = SIGABRT;
 		break;
 	    case EX_MOD:
+#if OPT_A3
+	    // sig = SIGKILL;
+	    sys__exit(SIGKILL);
+	    return;
+#endif /* OPT_A3 */
 	    case EX_TLBL:
 	    case EX_TLBS:
 		sig = SIGSEGV;
@@ -232,8 +240,11 @@ mips_trap(struct trapframe *tf)
 	 */
 	switch (code) {
 	case EX_MOD:
-		if (vm_fault(VM_FAULT_READONLY, tf->tf_vaddr)==0) {
-			goto done;
+		if (vm_fault(VM_FAULT_READONLY, tf->tf_vaddr)==EFAULT) {
+#if OPT_A3
+			kill_curthread(tf->tf_epc, code, tf->tf_vaddr);
+#endif /* OPT_A3 */
+			goto done;		
 		}
 		break;
 	case EX_TLBL:

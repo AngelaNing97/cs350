@@ -54,6 +54,8 @@
 #include <array.h>
 #include <kern/errno.h>
 #include <kern/wait.h>
+#include <kern/signal.h>
+#include "opt-A3.h"
 
 /*
  * The process for the kernel; this holds all the kernel-only threads.
@@ -434,7 +436,16 @@ setProcExitCode(pid_t pid, int exit_code) {
 	if (pte == NULL) {
 		return ESRCH;
 	}
+#if OPT_A3
+	if (exit_code == SIGKILL) {
+		pte->exit_code = _MKWAIT_SIG(exit_code);
+	} else {
+		pte->exit_code = _MKWAIT_EXIT(exit_code);
+	}
+#else
 	pte->exit_code = _MKWAIT_EXIT(exit_code);
+#endif /* OPT_A3 */
+	
 	return 0;
 }
 

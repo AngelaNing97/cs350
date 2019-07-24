@@ -119,12 +119,21 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
 	faultaddress &= PAGE_FRAME;
 
+#if OPT_A3
+	bool is_code = false;
+#else
+#endif /* OPT_A3 */
+
 	DEBUG(DB_VM, "dumbvm: fault: 0x%x\n", faultaddress);
 
 	switch (faulttype) {
 	    case VM_FAULT_READONLY:
 		/* We always create pages read-write, so we can't get this */
-		panic("dumbvm: got VM_FAULT_READONLY\n");
+#if OPT_A3
+	    return EFAULT;
+#else
+	    panic("dumbvm: got VM_FAULT_READONLY\n");
+#endif /* OPT_A3 */
 	    case VM_FAULT_READ:
 	    case VM_FAULT_WRITE:
 		break;
@@ -171,7 +180,10 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 	stackbase = USERSTACK - DUMBVM_STACKPAGES * PAGE_SIZE;
 	stacktop = USERSTACK;
 
-	if (faultaddress >= vbase1 && faultaddress < vtop1) {
+	if (faultaddress >= vbase1 && faultaddress < vtop1) { //code segment
+#if OPT_A3
+		is_code = true;
+#endif /* OPT_A3 */
 		paddr = (faultaddress - vbase1) + as->as_pbase1;
 	}
 	else if (faultaddress >= vbase2 && faultaddress < vtop2) {
@@ -195,18 +207,33 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 		if (elo & TLBLO_VALID) {
 			continue;
 		}
+
 		ehi = faultaddress;
 		elo = paddr | TLBLO_DIRTY | TLBLO_VALID;
+
+#if OPT_A3
+		if (is_code && as->load_elf_done) {
+			elo &= ~TLBLO_DIRTY;
+		}
+#endif /* OPT_A3 */
+
 		DEBUG(DB_VM, "dumbvm: 0x%x -> 0x%x\n", faultaddress, paddr);
 		tlb_write(ehi, elo, i);
 		splx(spl);
 		return 0;
 	}
 
+// tlb is full
 #if OPT_A3
-	tlb_random(faultaddress, paddr);
+	ehi = faultaddress;
+	elo = paddr | TLBLO_DIRTY | TLBLO_VALID;
+
+	if (is_code && as->load_elf_done) {
+		elo &= ~TLBLO_DIRTY;
+	}
+	tlb_random(ehi, elo);
 	splx(spl);
-		return 0;
+	return 0;
 #else
 	kprintf("dumbvm: Ran out of TLB entries - cannot handle page fault\n");
 	splx(spl);
@@ -230,6 +257,10 @@ as_create(void)
 	as->as_npages2 = 0;
 	as->as_stackpbase = 0;
 
+#if OPT_A3
+	as->load_elf_done = false;
+#else
+#endif /* OPT_A3 */
 	return as;
 }
 
@@ -347,7 +378,12 @@ as_prepare_load(struct addrspace *as)
 int
 as_complete_load(struct addrspace *as)
 {
+#if OPT_A3
+	as->load_elf_done = true;
+	as_activate();
+#else
 	(void)as;
+#endif /* OPT_A3 */
 	return 0;
 }
 
