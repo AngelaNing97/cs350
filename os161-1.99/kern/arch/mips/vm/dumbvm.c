@@ -40,6 +40,7 @@
 #include "opt-A2.h"
 #include "opt-A3.h"
 #include <copyinout.h>
+#include <synch.h>
 
 /*
  * Dumb MIPS-only "VM system" that is intended to only be just barely
@@ -54,10 +55,37 @@
  */
 static struct spinlock stealmem_lock = SPINLOCK_INITIALIZER;
 
+#if OPT_A3
+
+paddr_t lo;
+paddr_t hi;
+
+int *coremap = NULL;
+bool coremap_created = false;
+int num_pages = 0;
+
+static struct lock *coremap_lock = NULL;
+
+#endif /* OPT_A3 */
+
 void
 vm_bootstrap(void)
 {
-	/* Do nothing. */
+#if OPT_A3
+	coremap_lock = lock_create("coremap_lock");
+	ram_getsize(&lo, &hi);
+	num_pages = (hi - lo) / PAGE_SIZE;
+
+	coremap = (int *)PADDR_TO_KVADDR(lo);
+	for (int i = 0; i < num_pages; i++) {
+		coremap[i] = 0;
+	}
+	lo += ROUNDUP(num_pages * sizeof(int), PAGE_SIZE); //page-size aligned
+	num_pages = (hi - lo) / PAGE_SIZE; //updated number of pages
+	coremap_created = true;
+
+	// kprintf("lo address at boot is %u\n", (unsigned int)PADDR_TO_KVADDR(lo) );
+#endif /* OPT_A3 */
 }
 
 static
@@ -66,11 +94,48 @@ getppages(unsigned long npages)
 {
 	paddr_t addr;
 
+#if OPT_A3
+	if (coremap_created) {
+		// search coremap for continuous block
+		// kprintf("allocation %u pages\n", (unsigned int) npages);
+		lock_acquire(coremap_lock);
+		int i = 0;
+		while (i < num_pages) {
+			unsigned available_pages = 0;
+			int j = i;
+			while (j < num_pages && coremap[j] == 0 && available_pages < npages) {
+				available_pages++;
+				j++;
+			}
+			if (available_pages == npages) {
+				addr = lo + i*PAGE_SIZE;
+				for (unsigned long z = 0; z < npages; z++) {
+					coremap[i+z] = (int)z+1;
+					// kprintf("coremap at index %d is %d\n", (int)(i+z), (int)coremap[i+z]);
+				}
+				// kprintf("alloc addr: %d\n", addr);
+				lock_release(coremap_lock);
+				return addr;
+			}
+			i = j+1;
+		}
+		lock_release(coremap_lock);
+		return 0;
+	} else {
+		spinlock_acquire(&stealmem_lock);
+
+		addr = ram_stealmem(npages);
+
+		spinlock_release(&stealmem_lock);
+	}
+#else
 	spinlock_acquire(&stealmem_lock);
 
 	addr = ram_stealmem(npages);
 	
 	spinlock_release(&stealmem_lock);
+#endif /* OPT_A3 */
+
 	return addr;
 }
 
@@ -86,12 +151,50 @@ alloc_kpages(int npages)
 	return PADDR_TO_KVADDR(pa);
 }
 
+void free_ppages(paddr_t addr) {
+	int i = (addr - lo) / PAGE_SIZE;
+		
+		// kprintf("vlo: %u\n", (int) vlo);
+		while (true) {
+			// kprintf("i: %u\n", i);
+			int temp = coremap[i];
+			coremap[i] = 0;
+			if (i+1 < num_pages && coremap[i+1] > temp) {
+				i++;
+			} else {
+				break;
+			}
+		}
+}
+
 void 
 free_kpages(vaddr_t addr)
 {
 	/* nothing - leak the memory. */
-
+#if OPT_A3 
+	// kprintf("addr: %u\n", (int) addr);
+	// vaddr_t vlo = PADDR_TO_KVADDR(lo);
+	// int i = (addr - vlo) / PAGE_SIZE;
+	lock_acquire(coremap_lock);
+	paddr_t paddr = addr - MIPS_KSEG0;
+	int i = (paddr - lo) / PAGE_SIZE;
+	
+	// kprintf("vlo: %u\n", (int) vlo);
+	while (true) {
+		// kprintf("i: %u\n", i);
+		int temp = coremap[i];
+		coremap[i] = 0;
+		if (i+1 < num_pages && coremap[i+1] > temp) {
+			i++;
+		} else {
+			break;
+		}
+	}
+	lock_release(coremap_lock);
+#else
 	(void)addr;
+#endif /* OPT_A3 */
+ 
 }
 
 void
@@ -267,7 +370,13 @@ as_create(void)
 void
 as_destroy(struct addrspace *as)
 {
+#if OPT_A3 
+	free_ppages(as->as_pbase1);
+	free_ppages(as->as_pbase2);
+	free_kpages(PADDR_TO_KVADDR(as->as_stackpbase));
+#else
 	kfree(as);
+#endif /* OPT_A3 */
 }
 
 void
