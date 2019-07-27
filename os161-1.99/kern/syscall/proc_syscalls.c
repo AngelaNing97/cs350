@@ -276,6 +276,7 @@ int sys_execv(char *program, char **args) {
 
   /* Done with the file now. */
   vfs_close(v);
+  kfree(progname);
 
   //TODO: count the number of arguments and copy them into the kernel
   if (args != NULL) {
@@ -316,6 +317,12 @@ int sys_execv(char *program, char **args) {
 
   //delete old address space
   as_destroy(oldas);
+
+  //destroy the arguments
+  for(int i = 0; i <= ac; i++) {
+    kfree(programArgs[i]);
+  }
+  kfree(programArgs);
 
   //call enter_new_process with address to the arguments on the stack, the stack ptr, and the program entry point
   /* Warp to user mode. */

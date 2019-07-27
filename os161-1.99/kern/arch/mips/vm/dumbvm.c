@@ -151,7 +151,7 @@ alloc_kpages(int npages)
 	return PADDR_TO_KVADDR(pa);
 }
 
-void free_ppages(paddr_t addr) {
+void free_kpages_p(paddr_t addr) {
 	int i = (addr - lo) / PAGE_SIZE;
 		
 		// kprintf("vlo: %u\n", (int) vlo);
@@ -176,8 +176,10 @@ free_kpages(vaddr_t addr)
 	// vaddr_t vlo = PADDR_TO_KVADDR(lo);
 	// int i = (addr - vlo) / PAGE_SIZE;
 	lock_acquire(coremap_lock);
-	paddr_t paddr = addr - MIPS_KSEG0;
-	int i = (paddr - lo) / PAGE_SIZE;
+	// paddr_t paddr = addr - MIPS_KSEG0;
+	// int i = (paddr - lo) / PAGE_SIZE;
+	vaddr_t vlo = PADDR_TO_KVADDR(lo);
+	int i = (addr - vlo) / PAGE_SIZE;
 	
 	// kprintf("vlo: %u\n", (int) vlo);
 	while (true) {
@@ -371,8 +373,8 @@ void
 as_destroy(struct addrspace *as)
 {
 #if OPT_A3 
-	free_ppages(as->as_pbase1);
-	free_ppages(as->as_pbase2);
+	free_kpages_p(as->as_pbase1);
+	free_kpages_p(as->as_pbase2);
 	free_kpages(PADDR_TO_KVADDR(as->as_stackpbase));
 #else
 	kfree(as);
