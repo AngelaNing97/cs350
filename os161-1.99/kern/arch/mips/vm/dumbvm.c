@@ -54,6 +54,7 @@
  * Wrap rma_stealmem in a spinlock.
  */
 static struct spinlock stealmem_lock = SPINLOCK_INITIALIZER;
+static struct spinlock coremap_lock = SPINLOCK_INITIALIZER;
 
 #if OPT_A3
 
@@ -64,7 +65,7 @@ int *coremap = NULL;
 bool coremap_created = false;
 int num_pages = 0;
 
-static struct lock *coremap_lock = NULL;
+// static struct lock *coremap_lock = NULL;
 
 #endif /* OPT_A3 */
 
@@ -72,7 +73,7 @@ void
 vm_bootstrap(void)
 {
 #if OPT_A3
-	coremap_lock = lock_create("coremap_lock");
+	// coremap_lock = lock_create("coremap_lock");
 	ram_getsize(&lo, &hi);
 	num_pages = (hi - lo) / PAGE_SIZE;
 
@@ -98,7 +99,8 @@ getppages(unsigned long npages)
 	if (coremap_created) {
 		// search coremap for continuous block
 		// kprintf("allocation %u pages\n", (unsigned int) npages);
-		lock_acquire(coremap_lock);
+		// lock_acquire(coremap_lock);
+		spinlock_acquire(&coremap_lock);
 		int i = 0;
 		while (i < num_pages) {
 			unsigned available_pages = 0;
@@ -114,12 +116,14 @@ getppages(unsigned long npages)
 					// kprintf("coremap at index %d is %d\n", (int)(i+z), (int)coremap[i+z]);
 				}
 				// kprintf("alloc addr: %d\n", addr);
-				lock_release(coremap_lock);
+				// lock_release(coremap_lock);
+				spinlock_release(&coremap_lock);
 				return addr;
 			}
 			i = j+1;
 		}
-		lock_release(coremap_lock);
+		// lock_release(coremap_lock);
+		spinlock_release(&coremap_lock);
 		return 0;
 	} else {
 		spinlock_acquire(&stealmem_lock);
@@ -152,6 +156,7 @@ alloc_kpages(int npages)
 }
 
 void free_kpages_p(paddr_t addr) {
+	spinlock_acquire(&coremap_lock);
 	int i = (addr - lo) / PAGE_SIZE;
 		
 		// kprintf("vlo: %u\n", (int) vlo);
@@ -165,6 +170,7 @@ void free_kpages_p(paddr_t addr) {
 				break;
 			}
 		}
+	spinlock_release(&coremap_lock);
 }
 
 void 
@@ -175,7 +181,8 @@ free_kpages(vaddr_t addr)
 	// kprintf("addr: %u\n", (int) addr);
 	// vaddr_t vlo = PADDR_TO_KVADDR(lo);
 	// int i = (addr - vlo) / PAGE_SIZE;
-	lock_acquire(coremap_lock);
+	// lock_acquire(coremap_lock);
+	spinlock_acquire(&coremap_lock);
 	// paddr_t paddr = addr - MIPS_KSEG0;
 	// int i = (paddr - lo) / PAGE_SIZE;
 	vaddr_t vlo = PADDR_TO_KVADDR(lo);
@@ -192,7 +199,8 @@ free_kpages(vaddr_t addr)
 			break;
 		}
 	}
-	lock_release(coremap_lock);
+	// lock_release(coremap_lock);
+	spinlock_release(&coremap_lock);
 #else
 	(void)addr;
 #endif /* OPT_A3 */
@@ -275,6 +283,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 	KASSERT(as->as_stackpbase != NULL);
 
 	KASSERT((as->as_vbase1 & PAGE_FRAME) == as->as_vbase1);
+	// ugh 
 	// KASSERT((as->as_pbase1[0] & PAGE_FRAME) == as->as_pbase1[0]);
 	KASSERT((as->as_vbase2 & PAGE_FRAME) == as->as_vbase2);
 	// KASSERT((as->as_pbase2[0] & PAGE_FRAME) == as->as_pbase2[0]);
